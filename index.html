@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wheel Jackpot Game (Serverless)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; overflow: hidden; background-color: #1a202c; }
+        .wheel-container { position: relative; width: 400px; height: 400px; margin: 0 auto; }
+        canvas { display: block; position: absolute; top: 0; left: 0; transition: transform 6s cubic-bezier(0.25, 0.1, 0.25, 1); }
+        .pointer { position: absolute; top: 50%; left: 50%; width: 0; height: 0; border-left: 15px solid transparent; border-right: 15px solid transparent; border-top: 30px solid #f56565; transform: translate(-50%, -120%) rotate(180deg); z-index: 10; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
+        .center-circle { position: absolute; top: 50%; left: 50%; width: 60px; height: 60px; background: #2d3748; border-radius: 50%; transform: translate(-50%, -50%); z-index: 11; border: 5px solid #4a5568; }
+        .spinner { border: 4px solid rgba(255, 255, 255, 0.2); border-left-color: #63b3ed; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 1rem auto; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex items-center justify-center min-h-screen">
+
+    <div class="w-full max-w-2xl mx-auto p-4 md:p-8 text-center">
+        <h1 class="text-4xl md:text-5xl font-black uppercase tracking-wider mb-2 text-indigo-400">Wheel Jackpot</h1>
+        <p class="text-gray-400 mb-6">A new winner every minute at 54 seconds!</p>
+
+        <div class="bg-gray-800 rounded-xl shadow-2xl p-6 mb-6">
+            <h2 id="timer-title" class="text-lg font-semibold text-gray-300">Next Draw In</h2>
+            <div id="timer" class="text-6xl font-bold text-green-400 tracking-tighter my-2">--:--</div>
+            <p class="text-sm text-gray-500">Target Time: <span id="targetTime">--:--:--</span></p>
+        </div>
+
+        <div class="wheel-container mb-6">
+            <div class="pointer"></div>
+            <canvas id="wheelCanvas" width="400" height="400"></canvas>
+            <div class="center-circle"></div>
+        </div>
+
+        <div id="result-box" class="bg-gray-800 rounded-xl shadow-2xl p-6 min-h-[160px] flex flex-col justify-center">
+            <h2 id="result-title" class="text-lg font-semibold text-gray-300">Last Winning Number</h2>
+            <div id="result-content">
+                <div id="result" class="text-5xl font-bold text-yellow-400 my-2">-</div>
+                <p class="text-xs text-gray-500 break-all">Block: <span id="blockNumber">N/A</span></p>
+                <p class="text-xs text-gray-500 break-all">Hash: <span id="blockHash">N/A</span></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('wheelCanvas');
+        const ctx = canvas.getContext('2d');
+        const timerTitle = document.getElementById('timer-title');
+        const timerDisplay = document.getElementById('timer');
+        const targetTimeDisplay = document.getElementById('targetTime');
+        const resultTitle = document.getElementById('result-title');
+        const resultContent = document.getElementById('result-content');
+        
+        const segments = 10;
+        const segmentColors = ['#4A5568', '#A0AEC0', '#2D3748', '#718096', '#1A202C', '#63B3ED', '#4299E1', '#3182CE', '#2B6CB0', '#2C5282'];
+        const radius = canvas.width / 2;
+        const PI2 = Math.PI * 2;
+        const segmentAngle = PI2 / segments;
+
+        let currentRotation = 0;
+        let spinning = false;
+
+        function drawWheel() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.save();
+            ctx.translate(radius, radius);
+            for (let i = 0; i < segments; i++) {
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.arc(0, 0, radius - 5, i * segmentAngle, (i + 1) * segmentAngle);
+                ctx.closePath();
+                ctx.fillStyle = segmentColors[i % segmentColors.length];
+                ctx.fill();
+                ctx.stroke();
+            }
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 24px Inter';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            for (let i = 0; i < segments; i++) {
+                const angle = (i * segmentAngle) + (segmentAngle / 2);
+                const x = Math.cos(angle) * (radius * 0.75);
+                const y = Math.sin(angle) * (radius * 0.75);
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.rotate(angle + Math.PI / 2);
+                ctx.fillText(i, 0, 0);
+                ctx.restore();
+            }
+            ctx.restore();
+        }
+
+        function runSpinAndShowResult(data) {
+            spinning = true;
+            resultTitle.textContent = 'Spinning...';
+            resultContent.innerHTML = `<div class="spinner"></div><p class="text-sm text-gray-400">Winner is ${data.winningNumber}!</p>`;
+
+            const winningNumber = data.winningNumber;
+            const pointerAngle = 1.5 * PI2 / 2;
+            const sliceCenterAngle = (winningNumber + 0.5) * segmentAngle;
+            const winningAngle = pointerAngle - sliceCenterAngle;
+            const fixedSpins = 6;
+            const targetRotation = (PI2 * fixedSpins) + winningAngle;
+            
+            currentRotation = targetRotation;
+            canvas.style.transform = `rotate(${currentRotation}rad)`;
+
+            setTimeout(() => {
+                resultTitle.textContent = 'Last Winning Number';
+                resultContent.innerHTML = `
+                    <div id="result" class="text-5xl font-bold text-yellow-400 my-2">${data.winningNumber}</div>
+                    <p class="text-xs text-gray-500 break-all">Block: <span id="blockNumber">${data.blockNumber}</span></p>
+                    <p class="text-xs text-gray-500 break-all">Hash: <span id="blockHash">${data.blockHash}</span></p>
+                `;
+                const normalizedRotation = currentRotation % PI2;
+                canvas.style.transition = 'none';
+                canvas.style.transform = `rotate(${normalizedRotation}rad)`;
+                canvas.offsetHeight;
+                canvas.style.transition = 'transform 6s cubic-bezier(0.25, 0.1, 0.25, 1)';
+                currentRotation = normalizedRotation;
+                spinning = false; 
+
+                setTimeout(() => {
+                    if (!spinning) {
+                        resultTitle.textContent = 'Last Winning Number';
+                        resultContent.innerHTML = `
+                            <div id="result" class="text-5xl font-bold text-yellow-400 my-2">-</div>
+                            <p class="text-xs text-gray-500 break-all">Block: <span id="blockNumber">N/A</span></p>
+                            <p class="text-xs text-gray-500 break-all">Hash: <span id="blockHash">N/A</span></p>
+                        `;
+                    }
+                }, 15000);
+            }, 6000);
+        }
+
+        // --- API Logic ---
+        async function fetchWithDate(url) {
+            // This function adds the correct Date header to bypass system time issues.
+            const headers = { 'Date': new Date().toUTCString() };
+            return fetch(url, { headers });
+        }
+
+        async function getBlockData(blockNumber) {
+            const response = await fetchWithDate(`https://apilist.tronscan.org/api/block?number=${blockNumber}`);
+            if (!response.ok) return null;
+            const data = await response.json();
+            if (data.data && data.data.length > 0) {
+                const info = data.data[0];
+                return {
+                    blockNumber: info.number,
+                    blockHash: info.hash,
+                    blockTime: new Date(info.timestamp)
+                };
+            }
+            return null;
+        }
+
+        function getWinningNumberFromHash(hash) {
+            for (const char of [...hash].reverse()) {
+                if (!isNaN(parseInt(char, 10))) {
+                    return parseInt(char, 10);
+                }
+            }
+            return 0; // Fallback
+        }
+
+        async function runJackpot() {
+            if (spinning) return;
+            spinning = true;
+
+            console.log("Jackpot triggered. Waiting for block propagation...");
+            resultTitle.textContent = 'Waiting for Block...';
+            resultContent.innerHTML = '<div class="spinner"></div><p class="text-sm text-gray-400">Allowing time for block to be confirmed...</p>';
+
+            // Wait 5 seconds for the block at :54 to appear on the API
+            await new Promise(resolve => setTimeout(resolve, 5000));
+
+            try {
+                resultTitle.textContent = 'Searching for Block...';
+                resultContent.querySelector('p').textContent = 'Contacting TronScan API...';
+
+                // Fetch the latest block to start our search
+                const latestBlockResponse = await fetchWithDate('https://apilist.tronscan.org/api/block?sort=-number&limit=1');
+                if (!latestBlockResponse.ok) throw new Error("Could not fetch latest block.");
+                const latestBlockData = await latestBlockResponse.json();
+                let startBlockNumber = latestBlockData.data[0].number;
+                
+                console.log(`Starting search backwards from block ${startBlockNumber}`);
+
+                let winningBlock = null;
+                // Search the last 15 blocks. The target block should be in this range.
+                for (let i = 0; i < 15; i++) {
+                    const blockToCheck = startBlockNumber - i;
+                    console.log(`Checking block: ${blockToCheck}`);
+                    const blockData = await getBlockData(blockToCheck);
+                    if (blockData && blockData.blockTime.getSeconds() === 54) {
+                        winningBlock = blockData;
+                        console.log(`Found winning block:`, winningBlock);
+                        break;
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 100)); // Small delay between checks
+                }
+
+                if (winningBlock) {
+                    const winningNumber = getWinningNumberFromHash(winningBlock.blockHash);
+                    runSpinAndShowResult({ ...winningBlock, winningNumber });
+                } else {
+                    throw new Error("Could not find a block with a ':54' timestamp.");
+                }
+
+            } catch (error) {
+                console.error('Error during jackpot:', error);
+                resultTitle.textContent = 'Error';
+                resultContent.innerHTML = `<p class="text-red-400 text-sm">${error.message}</p>`;
+                spinning = false; // Release lock on error
+            }
+        }
+
+        // --- Timer Logic ---
+        function updateTimer() {
+            const now = new Date();
+            const seconds = now.getSeconds();
+
+            if (seconds === 54 && !spinning) {
+                if (!window.lastJackpotTime || (now.getTime() - window.lastJackpotTime > 30000)) {
+                    window.lastJackpotTime = now.getTime();
+                    runJackpot();
+                }
+            }
+
+            // Update countdown display
+            const nextDraw = new Date(now.getTime());
+            nextDraw.setSeconds(54, 0);
+            if (now.getSeconds() >= 54) {
+                nextDraw.setMinutes(nextDraw.getMinutes() + 1);
+            }
+            
+            const secondsRemaining = (nextDraw - now) / 1000;
+            const minutesPart = Math.floor(secondsRemaining / 60).toString().padStart(2, '0');
+            const secondsPart = Math.floor(secondsRemaining % 60).toString().padStart(2, '0');
+            
+            timerDisplay.textContent = `${minutesPart}:${secondsPart}`;
+            targetTimeDisplay.textContent = `${nextDraw.getHours().toString().padStart(2, '0')}:${nextDraw.getMinutes().toString().padStart(2, '0')}:54`;
+        }
+
+        window.onload = function() {
+            drawWheel();
+            updateTimer(); // Initial call
+            setInterval(updateTimer, 1000); // Main timer loop
+        };
+    </script>
+</body>
+</html>
